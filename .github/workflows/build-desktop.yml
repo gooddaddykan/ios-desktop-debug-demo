@@ -1,0 +1,32 @@
+name: Build and desktop preflight
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: desktop-demo
+  cancel-in-progress: true
+jobs:
+  demo:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install project generator
+        run: brew install xcodegen
+      - name: Build iOS simulator demo
+        run: |
+          xcodegen generate
+          xcodebuild -quiet -project DesktopDebugDemo.xcodeproj -scheme DesktopDebugDemo -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath build CODE_SIGNING_ALLOWED=NO build
+      - name: Check desktop service availability
+        run: bash scripts/desktop-preflight.sh
+      - name: Upload non-sensitive diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-diagnostics
+          path: diagnostics/
+          retention-days: 1
+          if-no-files-found: warn
