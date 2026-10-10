@@ -1,0 +1,61 @@
+name: Build and browser desktop test
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: desktop-demo
+  cancel-in-progress: true
+jobs:
+  browser-demo:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Build public iOS demo
+        run: |
+          brew install xcodegen
+          xcodegen generate
+          xcodebuild -quiet -project DesktopDebugDemo.xcodeproj -scheme DesktopDebugDemo -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath build CODE_SIGNING_ALLOWED=NO build
+      - name: Start private temporary desktop viewer
+        run: bash scripts/start-browser-desktop.sh
+      - name: Upload encrypted session link
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: encrypted-desktop-session
+          path: session/connection.enc
+          retention-days: 1
+      - name: Short interactive demo debugging window
+        run: |
+          SESSION_DIR=$(cat "$RUNNER_TEMP/ios-desktop-session-path")
+          for attempt in $(seq 1 120); do
+            if [ -f "$SESSION_DIR/stop" ]; then
+              echo "Viewer requested end of session."
+              break
+            fi
+            if ! kill -0 "$(cat "$SESSION_DIR/viewer.pid")" 2>/dev/null; then
+              echo "Viewer process exited."
+              break
+            fi
+            sleep 5
+          done
+      - name: Stop desktop services
+        if: always()
+        run: |
+          SESSION_DIR="$RUNNER_TEMP/ios-desktop-session"
+          for service in viewer tunnel; do
+            if [ -f "$SESSION_DIR/$service.pid" ]; then
+              kill "$(cat "$SESSION_DIR/$service.pid")" 2>/dev/null || true
+            fi
+          done
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart -deactivate || true
+      - name: Upload non-sensitive diagnostic notes
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: browser-desktop-diagnostics
+          path: diagnostics/
+          retention-days: 1
+          if-no-files-found: warn
